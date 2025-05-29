@@ -8,7 +8,7 @@ from torch import Tensor
 
 from pyqtorch.apply import apply_operator_dm
 from pyqtorch.embed import Embedding
-from pyqtorch.matrices import DEFAULT_MATRIX_DTYPE, IMAT, XMAT, YMAT, ZMAT
+from pyqtorch.matrices import DEFAULT_MATRIX_DTYPE, IMAT, XMAT, YMAT, ZMAT, kron_mat
 from pyqtorch.utils import (
     DensityMatrix,
     density_mat,
@@ -21,11 +21,11 @@ class Noise(torch.nn.Module):
     def __init__(
         self,
         kraus: list[Tensor],
-        target: int,
+        target: int | tuple[int, ...],  # Updated type hint
         error_probability: tuple[float, ...] | float,
     ) -> None:
         super().__init__()
-        self.target: int = target
+        self.target: int | tuple[int, ...] = target  # Updated type hint
         self.qubit_support: tuple[int, ...] = qubit_support_as_tuple(self.target)
         self.is_diagonal = False
         for index, tensor in enumerate(kraus):
@@ -347,7 +347,7 @@ class GeneralizedAmplitudeDamping(Noise):
 
     Raises:
         TypeError: If the probability or rate values is not float.
-        ValueError: If the damping rate  a correct probability.
+        ValueError: If the damping rate is not a correct probability.
     """
 
     def __init__(
@@ -375,3 +375,73 @@ class GeneralizedAmplitudeDamping(Noise):
         )
         kraus_generalized_amplitude_damping: list[Tensor] = [K0, K1, K2, K3]
         super().__init__(kraus_generalized_amplitude_damping, target, error_probability)
+
+
+class TwoQubitDepolarizing(Noise):
+    """
+    Initialize the TwoQubitDepolarizing gate.
+
+    The two-qubit depolarizing channel is defined as:
+
+    .. math::
+        (1-p) \\rho + \\frac{p}{15} (IX \\rho IX + IY \\rho IY + IZ \\rho IZ + XI \\rho XI + ... + ZZ \\rho ZZ)
+
+    Args:
+        target (tuple[int, int]): The indices of the qubits being affected by the noise.
+        error_probability (float): The probability of depolarizing error.
+
+    Raises:
+        TypeError: If the error_probability value is not a float.
+    """
+
+    def __init__(
+        self,
+        target: tuple[int, int],
+        error_probability: float,
+    ):
+        if error_probability > 1.0 or error_probability < 0.0:
+            raise ValueError("The error_probability value is not a correct probability")
+
+        paulis = [IMAT, XMAT, YMAT, ZMAT]
+        kraus_ops = [sqrt(1.0 - error_probability) * kron_mat([IMAT, IMAT])]
+        for i in range(4):
+            for j in range(4):
+                if i == 0 and j == 0:
+                    continue
+                kraus_ops.append(
+                    sqrt(error_probability / 15.0) * kron_mat([paulis[i], paulis[j]])
+                )
+        super().__init__(kraus_ops, target, error_probability)
+
+
+class TwoQubitDephasing(Noise):
+    """
+    Initialize the TwoQubitDephasing gate.
+
+    The two-qubit dephasing channel is defined as:
+
+    .. math::
+        (1-p) \\rho + \\frac{p}{3} (IZ \\rho IZ + ZI \\rho ZI + ZZ \\rho ZZ)
+
+    Args:
+        target (tuple[int, int]): The indices of the qubits being affected by the noise.
+        error_probability (float): The probability of dephasing error.
+
+    Raises:
+        TypeError: If the error_probability value is not a float.
+    """
+
+    def __init__(
+        self,
+        target: tuple[int, int],
+        error_probability: float,
+    ):
+        if error_probability > 1.0 or error_probability < 0.0:
+            raise ValueError("The error_probability value is not a correct probability")
+
+        K0 = sqrt(1.0 - error_probability) * kron_mat([IMAT, IMAT])
+        K1 = sqrt(error_probability / 3.0) * kron_mat([IMAT, ZMAT])
+        K2 = sqrt(error_probability / 3.0) * kron_mat([ZMAT, IMAT])
+        K3 = sqrt(error_probability / 3.0) * kron_mat([ZMAT, ZMAT])
+        kraus_ops = [K0, K1, K2, K3]
+        super().__init__(kraus_ops, target, error_probability)

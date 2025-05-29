@@ -26,6 +26,8 @@ from pyqtorch.noise import (
     GeneralizedAmplitudeDamping,
     Noise,
     PhaseDamping,
+    TwoQubitDepolarizing,
+    TwoQubitDephasing,
 )
 from pyqtorch.primitives import (
     OPS_DIGITAL,
@@ -384,3 +386,70 @@ def test_analog_noise_add():
         noise_add.noise_operators
     )
     assert noise_add.qubit_support == (2, 3)
+
+
+@pytest.mark.parametrize("n_qubits", [{"low": 2, "high": 5}], indirect=True)
+@pytest.mark.parametrize("batch_size", [{"low": 1, "high": 5}], indirect=True)
+@pytest.mark.parametrize(
+    "noise_type, error_probability",
+    [
+        (DigitalNoiseType.TWO_QUBIT_DEPOLARIZING, 0.1),
+        (DigitalNoiseType.TWO_QUBIT_DEPHASING, 0.1),
+    ],
+)
+def test_two_qubit_noise_gates(
+    n_qubits: int,
+    batch_size: int,
+    noise_type: DigitalNoiseType,
+    error_probability: float,
+    random_input_dm: DensityMatrix,
+) -> None:
+    target = tuple(random.sample(range(n_qubits), 2))
+    noise_protocol = DigitalNoiseProtocol(noise_type, error_probability, target)
+    gate_class, noise_info = noise_protocol.gates[0]
+    noise_gate = gate_class(target=noise_info.target, error_probability=noise_info.error_probability)
+    output_state = noise_gate(random_input_dm)
+    assert output_state.size() == torch.Size([2**n_qubits, 2**n_qubits, batch_size])
+    # Check trace preservation
+    for i in range(batch_size):
+        diag_batch = torch.diagonal(output_state[:, :, i], dim1=0, dim2=1)
+        assert torch.allclose(torch.sum(diag_batch), torch.tensor(1.0, dtype=torch.cdouble))
+
+    # Test with error_probability = 0
+    noise_protocol_zero_error = DigitalNoiseProtocol(noise_type, 0.0, target)
+    gate_class_zero, noise_info_zero = noise_protocol_zero_error.gates[0]
+    noise_gate_zero = gate_class_zero(
+        target=noise_info_zero.target, error_probability=noise_info_zero.error_probability
+    )
+    output_state_zero_error = noise_gate_zero(random_input_dm)
+    assert torch.allclose(output_state_zero_error, random_input_dm)
+
+    # Test QuantumOperation with two-qubit noise
+    op = X(target[0]) # Dummy operation
+    op_noisy = X(target[0], noise=noise_protocol)
+    output_state_op_noisy = op_noisy(random_input_dm)
+    assert output_state_op_noisy.size() == torch.Size([
+        2**n_qubits, 2**n_qubits, batch_size
+    ])
+
+    # Test consistency check: noise target not compatible with op target
+    if n_qubits > 2:
+        op_single_target = X(0)
+        noise_two_qubit_target_distinct = DigitalNoiseProtocol(
+            noise_type, error_probability, (1,2) # Assumes n_qubits >=3
+        )
+        op_noisy_fail = X(0, noise=noise_two_qubit_target_distinct)
+        with pytest.raises(ValueError):
+            op_noisy_fail(random_input_dm)
+
+        # Test consistency check: two-qubit noise target not subset of op target
+        op_two_targets = X(target[0], target[1]) #CNOT would be better if available easily
+        # Create a noise target that is not a subset
+        distinct_targets = tuple(random.sample(set(range(n_qubits)) - set(target), 2))
+        if len(distinct_targets) == 2:
+            noise_two_qubit_target_not_subset = DigitalNoiseProtocol(
+                noise_type, error_probability, distinct_targets
+            )
+            op_noisy_fail_subset = X(target[0], target[1], noise=noise_two_qubit_target_not_subset)
+            with pytest.raises(ValueError):
+                op_noisy_fail_subset(random_input_dm)

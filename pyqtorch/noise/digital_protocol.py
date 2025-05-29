@@ -14,13 +14,15 @@ class DigitalNoiseType(StrEnum):
     AMPLITUDE_DAMPING = "AmplitudeDamping"
     PHASE_DAMPING = "PhaseDamping"
     GENERALIZED_AMPLITUDE_DAMPING = "GeneralizedAmplitudeDamping"
+    TWO_QUBIT_DEPOLARIZING = "TwoQubitDepolarizing"
+    TWO_QUBIT_DEPHASING = "TwoQubitDephasing"
 
 
 @dataclass
 class DigitalNoiseInstance:
     type: DigitalNoiseType
     error_probability: tuple[float, ...] | float | None
-    target: int | None
+    target: int | tuple[int, int] | None
 
 
 class DigitalNoiseProtocol:
@@ -68,7 +70,7 @@ class DigitalNoiseProtocol:
             DigitalNoiseType | list[DigitalNoiseType] | list[DigitalNoiseProtocol]
         ),
         error_probability: tuple[float, ...] | float | None = None,
-        target: int | None = None,
+        target: int | tuple[int, int] | None = None,
     ) -> None:
 
         self._error_probability = error_probability
@@ -155,6 +157,14 @@ class DigitalNoiseProtocol:
     @classmethod
     def generalized_amplitude_damping(cls, *args, **kwargs) -> DigitalNoiseProtocol:
         return cls(DigitalNoiseType.GENERALIZED_AMPLITUDE_DAMPING, *args, **kwargs)
+
+    @classmethod
+    def two_qubit_depolarizing(cls, *args, **kwargs) -> DigitalNoiseProtocol:
+        return cls(DigitalNoiseType.TWO_QUBIT_DEPOLARIZING, *args, **kwargs)
+
+    @classmethod
+    def two_qubit_dephasing(cls, *args, **kwargs) -> DigitalNoiseProtocol:
+        return cls(DigitalNoiseType.TWO_QUBIT_DEPHASING, *args, **kwargs)
 
     def __repr__(self) -> str:
         if self.len == 1:

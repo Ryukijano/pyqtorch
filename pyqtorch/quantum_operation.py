@@ -364,9 +364,32 @@ class QuantumOperation(torch.nn.Module):
 
         for noise_class, noise_info in self.noise.gates:  # type: ignore [union-attr]
             if noise_info.target is None:
-                target = self.target if len(self.target) == 1 else self.target[0]
+                if len(self.target) == 1:
+                    target = self.target[0]
+                elif len(self.target) == 2:
+                    target = self.target
+                else:
+                    # Default to first qubit if target is ambiguous for single-qubit noise
+                    # and operation is on more than 2 qubits
+                    target = self.target[0]
             else:
                 target = noise_info.target
+
+            # Check consistency of noise target and operation target
+            noise_target_tuple = target if isinstance(target, tuple) else (target,)
+            op_target_tuple = self.target
+
+            # For single qubit noise, it can be applied to any of the operation's target qubits
+            # For two qubit noise, its targets must be a subset of the operation's targets
+            if len(noise_target_tuple) == 1 and not all(t in op_target_tuple for t in noise_target_tuple):
+                 raise ValueError(
+                    f"Noise target {target} is not compatible with operation target {self.target}."
+                 )
+            elif len(noise_target_tuple) == 2 and not all(t in op_target_tuple for t in noise_target_tuple):
+                raise ValueError(
+                    f"Two-qubit noise target {target} must be a subset of operation target {self.target}."
+                )
+
             noise_gate = noise_class(
                 target=target, error_probability=noise_info.error_probability
             )
